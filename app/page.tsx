@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 type PaletteColor = [number, number, number];
-// CODE GOES HERE
+import { getColorSync, getPaletteSync, getSwatches } from 'colorthief';
+import { createWorker } from "tesseract.js";
 
 const SHORTCUTS = [
   {
@@ -118,16 +119,35 @@ export default function Home() {
 
   async function extractPalette(image: HTMLImageElement) {
 
-    // CODE GOES HERE
-    setPaletteStatus(`Colours extracted: `+imageUrl.length);
+
+    const colors = getPaletteSync(image, { colorCount: 6 });
+    const dominant = getColorSync(image);
+
+    const output = {
+      colors: colors?.map((color) => color.array()) ?? [],
+      dominant: dominant?.array() ?? null,
+    };
+
+    setPaletteStatus(`Colours extracted: ` + JSON.stringify(output));
     setDominantColor([128, 64, 64]);
     setPalette([[128, 64, 64]]);
 
   }
 
   async function recognizeText(image: HTMLImageElement) {
-    // CODE GOES HERE
-    setTextResult(`Text extracted: `+imageUrl.length);
+    const worker = await createWorker("eng");
+
+    try {
+      const {
+        data: { text },
+      } = await worker.recognize(image);
+
+      setTextResult(`Text extracted: ` + text);
+
+      return text;
+    } finally {
+      await worker.terminate();
+    }
   }
 
   async function analyzeVision({
@@ -137,8 +157,56 @@ export default function Home() {
     imageUri: string;
     base64Content?: string | null;
   }) {
-    // CODE GOES HERE
-    setVisionResult(`Vision extracted: `+imageUrl.length);
+
+    const VISION_ENDPOINT = "https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBQWCGoUI5106XVckHLZhXdcSXbgs6KS8c";
+
+        const response = await fetch(VISION_ENDPOINT, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            requests: [
+                {
+                    image: base64Content
+                        ? {
+                              content: base64Content,
+                          }
+                        : {
+                              source: {
+                                  imageUri,
+                              },
+                          },
+                    features: [
+                        { maxResults: 50, type: "LANDMARK_DETECTION" },
+                        { maxResults: 50, type: "FACE_DETECTION" },
+                        {
+                            maxResults: 50,
+                            model: "builtin/latest",
+                            type: "OBJECT_LOCALIZATION",
+                        },
+                        {
+                            maxResults: 50,
+                            model: "builtin/latest",
+                            type: "LOGO_DETECTION",
+                        },
+                        { maxResults: 50, type: "LABEL_DETECTION" },
+                        {
+                            maxResults: 50,
+                            model: "builtin/latest",
+                            type: "DOCUMENT_TEXT_DETECTION",
+                        },
+                        { maxResults: 50, type: "SAFE_SEARCH_DETECTION" },
+                        { maxResults: 50, type: "IMAGE_PROPERTIES" },
+                        { maxResults: 50, type: "CROP_HINTS" },
+                    ],
+                },
+            ],
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Vision request failed with status ${response.status}`);
+    }
+    setVisionResult(`Vision extracted: ` + await response.text());
   }
 
   return (
@@ -223,7 +291,7 @@ export default function Home() {
               </h4>
               <div
                 id="palette"
-                className="flex min-h-14 flex-wrap items-center gap-2 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 overflow-hidden"
+                className="text-black flex min-h-14 flex-wrap items-center gap-2 rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 overflow-hidden"
               >
                 {paletteStatus}
               </div>
